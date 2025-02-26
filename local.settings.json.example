@@ -8,6 +8,5 @@
     "AZURE_DEVOPS_PROJECT": "",
     "OPENROUTER_API_KEY": "",
     "OPENROUTER_MODEL": "google/gemini-2.0-flash-lite-preview-02-05:free",
-    "CODE_REVIEW_PROMPT": "Perform a thorough code review focusing on best practices, potential bugs, security issues, and performance optimizations."
   }
 }

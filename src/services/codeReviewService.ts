@@ -1,6 +1,7 @@
 import axios from 'axios';
 import * as dotenv from 'dotenv';
-
+import * as GitInterfaces from 'azure-devops-node-api/interfaces/GitInterfaces';
+import { FileChange } from './azureDevOpsService';
 dotenv.config();
 
 // OpenRouter API configuration
@@ -13,58 +14,18 @@ export interface PullRequestDetails {
   changes: Array<{
     path: string;
     content: string | null;
+    diff: string | null;
     changeType: string;
     error?: string;
   }>;
 }
 
 /**
- * Detect the programming language based on file extension
- */
-function detectLanguage(filePath: string): string {
-  const extension = filePath.split('.').pop()?.toLowerCase();
-
-  const languageMap: Record<string, string> = {
-    'js': 'JavaScript',
-    'ts': 'TypeScript',
-    'jsx': 'React JSX',
-    'tsx': 'React TSX',
-    'py': 'Python',
-    'java': 'Java',
-    'cs': 'C#',
-    'go': 'Go',
-    'rb': 'Ruby',
-    'php': 'PHP',
-    'swift': 'Swift',
-    'kt': 'Kotlin',
-    'rs': 'Rust',
-    'c': 'C',
-    'cpp': 'C++',
-    'h': 'C/C++ Header',
-    'html': 'HTML',
-    'css': 'CSS',
-    'scss': 'SCSS',
-    'json': 'JSON',
-    'md': 'Markdown',
-    'sql': 'SQL',
-    'sh': 'Shell',
-    'ps1': 'PowerShell',
-    'yaml': 'YAML',
-    'yml': 'YAML',
-    'xml': 'XML',
-    'dockerfile': 'Dockerfile',
-  };
-
-  return extension ? (languageMap[extension] || 'Unknown') : 'Unknown';
-}
-
-/**
  * Prepare the code review prompt with the pull request details
  */
-function prepareCodeReviewPrompt(prDetails: PullRequestDetails): string {
-  const { pullRequest, changes } = prDetails;
-
-  let prompt = `${codeReviewPrompt}\n\n`;
+function prepareCodeReviewPrompt(pullRequest: GitInterfaces.GitPullRequest, changes: FileChange[]): string
+{
+  let prompt = "Perform a thorough code review focusing on best practices, potential bugs, security issues, and performance optimizations.\n\n";
 
   // Add pull request information
   prompt += `Pull Request Title: ${pullRequest.title}\n`;
@@ -73,20 +34,15 @@ function prepareCodeReviewPrompt(prDetails: PullRequestDetails): string {
   // Add files changed
   prompt += `Files changed (${changes.length}):\n\n`;
 
+  var index = 1;
   // Add each file's content
-  changes.forEach((file, index) => {
-    const language = detectLanguage(file.path);
-    prompt += `File ${index + 1}: ${file.path} (${language})\n`;
-    prompt += `Change type: ${file.changeType}\n`;
-
-    if (file.error) {
-      prompt += `Error retrieving content: ${file.error}\n`;
-    } else if (file.content) {
-      prompt += "```\n";
-      prompt += file.content;
-      prompt += "\n```\n\n";
-    } else {
-      prompt += "Content not available\n\n";
+  changes.forEach((file) => {
+    const language = file.language;
+    if (language != "Unknown") {
+      prompt += `File ${index}: ${file.fileName} (${language})\n`;
+      prompt += `<ChangeContent>\n`;
+      prompt += file.changeContent;
+      prompt += `</ChangeContent>\n\n`;
     }
   });
 
@@ -98,6 +54,8 @@ function prepareCodeReviewPrompt(prDetails: PullRequestDetails): string {
 4. Security Concerns
 5. Specific Recommendations
 
+Give the developer some encouragement at the end of the review.
+
 Format your review for readability in Azure DevOps comments.`;
 
   return prompt;
@@ -106,13 +64,15 @@ Format your review for readability in Azure DevOps comments.`;
 /**
  * Perform code review using OpenRouter API
  */
-export async function doCodeReview(prDetails: PullRequestDetails): Promise<string> {
-  if (prDetails.changes.length === 0) {
+export async function doCodeReview(pullRequest: GitInterfaces.GitPullRequest, changes: FileChange[]): Promise<string> {
+  if (changes.length === 0) {
     return "";
   }
 
   try {
-    const prompt = prepareCodeReviewPrompt(prDetails);
+    const prompt = prepareCodeReviewPrompt(pullRequest, changes);
+
+    console.log(prompt);
 
     console.log(`Starting code review with model ${openRouterModel}`);
 
@@ -124,7 +84,10 @@ export async function doCodeReview(prDetails: PullRequestDetails): Promise<strin
         messages: [
           {
             role: 'system',
-            content: 'You are a senior developer and an expert code reviewer of the language of the code. Analyze the code and provide detailed, constructive feedback. Do not halucinate any code, and be specific about the changes. Use markdown formatting of review.'
+            content: 'You are a senior developer and an expert code reviewer of the language of the code. \
+              Analyze the code and provide detailed, constructive feedback where the comments about the code are not harsh or can be considered \
+              as a negative comment. Do not hallucinate any code, and be specific about the changes. \
+              Give the developer some encouragement at the end of the review to keep going and be positive. Use markdown formatting of review.'
           },
           {
             role: 'user',
@@ -148,7 +111,7 @@ export async function doCodeReview(prDetails: PullRequestDetails): Promise<strin
     }
 
     // Extract the review text from the response
-    const reviewText = response.data.choices[0]?.message?.content || 'Error: No review content generated';
+    const reviewText = response.data?.choices[0]?.message?.content || "";
 
     return reviewText;
   } catch (error: unknown) {
@@ -156,6 +119,6 @@ export async function doCodeReview(prDetails: PullRequestDetails): Promise<strin
 
     // Return a formatted error message
     const errorMessage = error instanceof Error ? error.message : 'Unknown error occurred';
-    return `# Code Review Error\n\nThere was an error generating the code review:\n\n\`\`\`\n${errorMessage}\n\`\`\`\n\nPlease check the function logs for more details.`;
+    return "";
   }
 }

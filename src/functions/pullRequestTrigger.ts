@@ -1,6 +1,6 @@
 import { app, HttpRequest, HttpResponseInit, InvocationContext } from "@azure/functions";
 import { doCodeReview } from "../services/codeReviewService";
-import { getPullRequestDetails, getPullRequestComments, addCommentToPullRequest } from "../services/azureDevOpsService";
+import { addCommentToPullRequest, getPullRequest, getPullRequestChanges, getPullRequestComments, PullRequestComment } from "../services/azureDevOpsService";
 
 interface PullRequestPayload {
   eventType: string;
@@ -50,24 +50,16 @@ export async function pullRequestTrigger(request: HttpRequest, context: Invocati
 
     context.log(`Processing pull request #${pullRequestId} in repository ${repositoryId}`);
 
-    // Get pull request comments to check if it already has comments
-    const comments = await getPullRequestComments(pullRequestId, repositoryId, projectId) as CommentThread[];
+    const pullRequest = await getPullRequest(pullRequestId, repositoryId);
 
-    // Check if there are any text comments (commentType == "text" or commentType == 1)
-    // System comments typically have commentType == "system" or commentType == 2
-    const hasTextComments = comments.some((thread: CommentThread) => {
-      if (thread.comments && Array.isArray(thread.comments)) {
-        return thread.comments.some((comment: Comment) =>
-          comment.commentType === "text" && comment.isDeleted === false
-        );
-      }
-      return false;
-    });
+    // Get pull request comments to check if it already has comments
+    const comments = await getPullRequestComments(pullRequest);
+
+    const hasTextComments = comments.length > 0;
 
     // If there are text comments, skip the code review
     if (hasTextComments) {
       context.log("Pull request already has text comments, skipping code review");
-      context.log(comments.map((comment) => comment.comments));
       return {
         status: 200,
         body: "Pull request already has text comments, skipping code review"
@@ -76,15 +68,14 @@ export async function pullRequestTrigger(request: HttpRequest, context: Invocati
 
     context.log("Pull request has no text comments, proceeding with code review");
 
-    // Get pull request details including the changes
-    const pullRequestDetails = await getPullRequestDetails(pullRequestId, repositoryId, projectId);
+    const changes = await getPullRequestChanges(pullRequest);
 
     // Perform code review
-    const codeReviewResult = await doCodeReview(pullRequestDetails);
+    const codeReviewResult = await doCodeReview(pullRequest, changes);
 
     // Add the code review as a comment to the pull request
     if (codeReviewResult != "") {
-      await addCommentToPullRequest(pullRequestId, repositoryId, projectId, codeReviewResult);
+      await addCommentToPullRequest(pullRequest, codeReviewResult);
       return {
         status: 200,
         body: "Code review completed and added as a comment"
